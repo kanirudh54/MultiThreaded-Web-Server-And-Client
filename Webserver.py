@@ -5,7 +5,7 @@ import sys     # To Take input from command Line
 import webbrowser # Open WebBrowser
 import threading  #For Thread
 import os
-from datetime import datetime 
+import datetime 
 
 class Server:
 
@@ -65,7 +65,10 @@ class Server:
      h = ''
      if (code == 200):      # If The Html file is present response is OK
         h = 'HTTP/1.1 200 OK\n'
-        h += 'Last-Modified:' + str(datetime.fromtimestamp(file_modifiedtime).strftime("%a, %d %b %Y %H:%M:%S")) + ' \n'
+        h += 'Last-Modified:' + str(datetime.datetime.fromtimestamp(file_modifiedtime).strftime("%a, %d %b %Y %H:%M:%S")) + ' \n'
+     elif (code ==304):
+        h = 'HTTP/1.1 304 Not Modified\n'
+        h += 'Last-Modified:' + str(datetime.datetime.fromtimestamp(file_modifiedtime).strftime("%a, %d %b %Y %H:%M:%S")) + ' \n'
      elif(code == 404):     #If the Html file is not there response is 404 Not Found 
         h = 'HTTP/1.1 404 Not Found\n'
 
@@ -107,22 +110,38 @@ class Server:
     if (request_method == 'GET') | (request_method == 'HEAD'):
        file_request = string.split(' ')
        file_request = file_request[1]
+       if_modified_since = string.split(' ')[2]
+       #print(if_modified_since)
+       if if_modified_since.startswith('If-Modified-Since:'):
+           if_modified_since = if_modified_since.split(':')[1]
+       else:
+           if_modified_since = ''
        file_request = file_request.split('?')[0]
        if (file_request == '/'):
             file_request = '/index.html'
        file_request = self.www_dir + file_request
        print ("Serving web page [",file_request,"]")
-       print ("Remove later", file_request)
+       #print ("Remove later", file_request)
         ## Load file content
+       status_code = 200
        try:
            file_handler = open(file_request,'rb')
            file_modifiedtime = os.path.getmtime(file_request)
-           print(file_handler, file_modifiedtime)
-           if (request_method == 'GET'):
+           open_browser = False 
+           if if_modified_since:
+               m,d,y = if_modified_since.split('-')
+               t = datetime.datetime(int(y),int(m),int(d))
+               t = int(t.strftime("%s"))
+               if float(t) < file_modifiedtime: # we need to get the file
+                   open_browser = True
+               else: # the status code will be 304
+                   status_code = 304
+           #print(file_handler, file_modifiedtime)
+           if (request_method == 'GET' and status_code == 200): # we dont read when status code is 304
                response_content = file_handler.read()
            file_handler.close()
-           response_headers = self.generate_headers(200, file_modifiedtime)
-           if (request_method == 'GET'):
+           response_headers = self.generate_headers(status_code, file_modifiedtime)
+           if (request_method == 'GET' and open_browser ):
                webbrowser.open(file_request) #Open The Html File On browser only if it is a GET request
        except Exception as e: # not found, generate 404 page
            print ("Warning, file not found. Serving response code 404\n",e)
@@ -131,7 +150,7 @@ class Server:
                   response_content = b"<html><body><p>Error 404: File not found</p><p>Python HTTP server</p></body></html>"
                   webbrowser.open(os.getcwd() + "/404.html")  #Open The HTML File on The Browser 
        server_response =  response_headers.encode() #return Header for Get and Head
-       if (request_method == 'GET'):
+       if (request_method == 'GET' and status_code==200 ):
            server_response +=  response_content # return Additional Content
        client_socket.send(server_response)
        print ("Closing connection with client")
